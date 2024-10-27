@@ -62,10 +62,19 @@ resource "aws_subnet" "subnet" {
 resource "aws_security_group" "k8s_sg" {
   vpc_id = aws_vpc.main.id
 
+  # Allow inbound SSH traffic
   ingress {
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  # Allow all outbound traffic
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"  # -1 means all protocols
     cidr_blocks = ["0.0.0.0/0"]
   }
 
@@ -83,36 +92,6 @@ resource "aws_instance" "k8s_node" {
   subnet_id           = aws_subnet.subnet[count.index].id  # Associate instance with one of the subnets
   vpc_security_group_ids = [aws_security_group.k8s_sg.id]  # Attach the SSH security group
   key_name            = "playground-tf-key"  # Define the key to access nodes
-
-  # User data script to install Docker and Kubernetes tools on each instance
-  user_data = <<-EOF
-    #!/bin/bash
-    # Update package information and install Docker
-    yum update -y
-    yum install -y docker
-
-    # Start Docker service
-    systemctl enable docker
-    systemctl start docker
-
-    # Add Kubernetes repository and install kubelet, kubeadm, kubectl
-    cat <<EOF2 > /etc/yum.repos.d/kubernetes.repo
-    [kubernetes]
-    name=Kubernetes
-    baseurl=https://packages.cloud.google.com/yum/repos/kubernetes-el7-\$basearch
-    enabled=1
-    gpgcheck=1
-    repo_gpgcheck=1
-    gpgkey=https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
-    EOF2
-
-    # Install Kubernetes tools
-    yum install -y kubelet kubeadm kubectl
-
-    # Enable and start kubelet service
-    systemctl enable kubelet
-    systemctl start kubelet
-    EOF
 
   # Tag each instance with a unique name for easier identification
   tags = {

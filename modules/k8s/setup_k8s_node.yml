@@ -1,0 +1,66 @@
+- name: Setup Kubernetes Node
+  hosts: k8s_nodes
+  become: true
+  tasks:
+    - name: Update all packages
+      yum:
+        name: "*"
+        state: latest
+
+    - name: Install essential tools
+      yum:
+        name: 
+          - vim
+          - docker
+        state: present
+
+    - name: Enable and start Docker service
+      systemd:
+        name: docker
+        enabled: true
+        state: started
+
+    - name: Download kubectl binary
+      get_url:
+        url: https://dl.k8s.io/release/v1.21.0/bin/linux/amd64/kubectl
+        dest: /usr/local/bin/kubectl
+        mode: '0755'
+
+    - name: Download kubeadm binary
+      get_url:
+        url: https://dl.k8s.io/release/v1.21.0/bin/linux/amd64/kubeadm
+        dest: /usr/local/bin/kubeadm
+        mode: '0755'
+
+    - name: Download kubelet binary
+      get_url:
+        url: https://dl.k8s.io/release/v1.21.0/bin/linux/amd64/kubelet
+        dest: /usr/local/bin/kubelet
+        mode: '0755'
+
+    - name: Create kubelet service file
+      copy:
+        dest: /etc/systemd/system/kubelet.service
+        content: |
+          [Unit]
+          Description=kubelet: The Kubernetes Node Agent
+          Documentation=https://kubernetes.io/docs/admin/kubelet
+          After=network.target
+
+          [Service]
+          ExecStart=/usr/local/bin/kubelet \
+            --kubeconfig=/etc/kubernetes/kubelet.conf \
+            --cgroup-driver=systemd \
+            --network-plugin=cni \
+            --pod-infra-container-image=k8s.gcr.io/pause:3.5
+          Restart=always
+          RestartSec=10
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Enable and start kubelet service
+      systemd:
+        name: kubelet
+        enabled: true
+        state: started
