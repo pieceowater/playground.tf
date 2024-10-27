@@ -1,5 +1,5 @@
-- name: Setup Kubernetes Node
-  hosts: k8s_nodes
+- name: Setup Kubernetes Cluster
+  hosts: [k8s_master, k8s_master]
   become: true
   tasks:
     - name: Update all packages
@@ -12,6 +12,9 @@
         name: 
           - vim
           - docker
+          - socat
+          - conntrack-tools
+          - iproute
         state: present
 
     - name: Enable and start Docker service
@@ -22,19 +25,19 @@
 
     - name: Download kubectl binary
       get_url:
-        url: https://dl.k8s.io/release/v1.21.0/bin/linux/amd64/kubectl
+        url: https://dl.k8s.io/release/v1.31.0/bin/linux/amd64/kubectl
         dest: /usr/local/bin/kubectl
         mode: '0755'
 
     - name: Download kubeadm binary
       get_url:
-        url: https://dl.k8s.io/release/v1.21.0/bin/linux/amd64/kubeadm
+        url: https://dl.k8s.io/release/v1.31.0/bin/linux/amd64/kubeadm
         dest: /usr/local/bin/kubeadm
         mode: '0755'
 
     - name: Download kubelet binary
       get_url:
-        url: https://dl.k8s.io/release/v1.21.0/bin/linux/amd64/kubelet
+        url: https://dl.k8s.io/release/v1.31.0/bin/linux/amd64/kubelet
         dest: /usr/local/bin/kubelet
         mode: '0755'
 
@@ -64,3 +67,51 @@
         name: kubelet
         enabled: true
         state: started
+
+- name: Initialize Kubernetes Master Node
+  hosts: k8s_master
+  become: true
+  tasks:
+    - name: Initialize Kubernetes
+      command: kubeadm init --pod-network-cidr=10.244.0.0/16
+      register: kubeadm_init_output
+      ignore_errors: true
+
+    - name: Create kubeconfig directory
+      file:
+        path: /home/ec2-user/.kube
+        state: directory
+        mode: '0755'
+      when: kubeadm_init_output.rc == 0
+
+    - name: Copy kubeconfig
+      command: /bin/sh -c 'export KUBECONFIG=/etc/kubernetes/admin.conf && cp $KUBECONFIG /home/ec2-user/.kube/config'
+      when: kubeadm_init_output.rc == 0
+
+    - name: Install Calico network plugin
+      command: kubectl apply -f https://docs.projectcalico.org/manifests/calico.yaml
+      when: kubeadm_init_output.rc == 0
+
+    - name: Output join command for worker nodes
+      debug:
+        msg: "{{ kubeadm_init_output.stdout_lines | select('match', 'kubeadm join') | list }}"
+
+- name: Join Worker Nodes to the Cluster
+  hosts: k8s_workers
+  become: true
+  tasks:
+    - name: Join the Kubernetes cluster
+      command: "{{ hostvars[groups['k8s_master'][0]].kubeadm_init_output.stdout_lines | select('match', 'kubeadm join') | list | first }}"
+      when: hostvars[groups['k8s_master'][0]].kubeadm_init_output.rc == 0
+
+- name: Output important data
+  hosts: localhost
+  tasks:
+    - name: Print cluster nodes
+      command: kubectl get nodes
+      register: nodes_output
+      when: hostvars[groups['k8s_master'][0]].kubeadm_init_output.rc == 0
+
+    - name: Display nodes
+      debug:
+        var: nodes_output.stdout_lines
